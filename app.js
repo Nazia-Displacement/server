@@ -10,8 +10,6 @@ const io = new Server({
 });
 require("dotenv").config();
 
-let doorActive = false;
-
 // ############################################################################
 // # Socket IO middlewares
 // ############################################################################
@@ -42,6 +40,11 @@ io.sockets.on("connection", (socket) => {
       console.log("Unity Disconnected");
     });
 
+    socket.on("unity-panel-update-request", (value) => {
+      console.log(value);
+      io.emit("panel-update", value);
+    });
+
     return;
   }
 
@@ -55,19 +58,23 @@ io.sockets.on("connection", (socket) => {
 
     socket.on("midi-message", (msg) => {
       console.log(msg);
+      console.log(msg.message[0]);
+      console.log(msg.message[1]);
       // if note 30 activated
-      if (msg.message[0] == 144 && msg.message[1] == 30) {
-        doorActive = true;
-        socket.broadcast.emit("door-on", msg.message[2]);
+      if (Number(msg.message[0]) == 144 && Number(msg.message[1]) == 10) {
+        console.log("Emit 144");
+        io.emit("door-on", msg.message[2]);
       }
       // if note 30 deactivated
-      else if (msg.message[0] == 128 && msg.message[1] == 30) {
-        doorActive = false;
-        socket.broadcast.emit("door-on", msg.message[2]);
+      else if (Number(msg.message[0]) == 128 && Number(msg.message[1]) == 10) {
+        console.log("Emit 128");
+        io.emit("door-on", msg.message[2]);
       }
       // if note 30 was activated and the value changed
-      else if (msg.message[0] == 176 && msg.message[1] == 1 && doorActive)
-        socket.broadcast.emit("door-on", msg.message[2]);
+      else if (Number(msg.message[0]) == 176 && Number(msg.message[1]) == 30) {
+        console.log("Emit 176");
+        io.emit("door-on", msg.message[2]);
+      }
     });
 
     return;
