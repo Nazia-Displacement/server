@@ -71,6 +71,7 @@ io.sockets.on("connection", (socket) => {
       console.log(`Unity Disconnected - ${socket.id}`);
       io.emit("deletePlayer", socket.id.toString());
       delete players[socket.id];
+      delete lastProcessedTime[socket.id];
     });
 
     socket.on("unity-panel-update-request", (value) => {
