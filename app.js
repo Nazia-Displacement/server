@@ -77,6 +77,8 @@ io.sockets.on("connection", (socket) => {
   // Unity client connected
   if (socket.handshake.auth.token == process.env.UNITYKEY) {
     console.log(`Unity Connected - ${socket.id}`);
+    players[socket.id] = null;
+    lastProcessedTime[socket.id] = null;
 
     socket.join(CLIENT_ROOM);
 
@@ -157,23 +159,52 @@ io.sockets.on("connection", (socket) => {
 
     socket.on("kmov", (k) => {
       //io.to(CAM_ROOM).emit("kmov2cam", k);
-      const vec = JSON.parse(k);
-      kinectTransform.position.x += vec.x * 1;
-      kinectTransform.position.y += vec.y * 1;
-      updateControllersKinectTransform = true;
+      try {
+        const vec = JSON.parse(k);
+        if(!isNumeric(vec.x)) throw("Bad Data");
+        if(!isNumeric(vec.y)) throw("Bad Data");
+        kinectTransform.position.x += vec.x * 1;
+        kinectTransform.position.y += vec.y * 1;
+        updateControllersKinectTransform = true;
+      } catch(e) {
+        console.error(`Bad kmov data from: ${socket.id}`);
+      }
     });
 
     socket.on("krot", (k) => {
       //io.to(CAM_ROOM).emit("krot2cam", k);
-      const vec = JSON.parse(k);
-      kinectTransform.rotation.x += vec.x * 1;
-      updateControllersKinectTransform = true;
+      try {
+        const vec = JSON.parse(k);
+        kinectTransform.rotation.x += vec.x * 5;
+        if(kinectTransform.rotation.x >= 360) kinectTransform.rotation.x -= 360;
+        else if(kinectTransform.rotation.x < 0) kinectTransform.rotation.x += 360;
+        updateControllersKinectTransform = true;
+      } catch(e) {
+        console.error(`Bad krot data from: ${socket.id}`);
+      }
     });
 
 
     socket.on("applyt", (k) => {
-      const transform = JSON.parse(k);
-      kinectTransform = transform;
+      try {
+        const transform = JSON.parse(k);
+        if(!isNumeric(transform.position.x)) throw("Bad Data");
+        if(!isNumeric(transform.position.y)) throw("Bad Data");
+        if(!isNumeric(transform.rotation.x)) throw("Bad Data");
+        if(!isNumeric(transform.rotation.y)) throw("Bad Data");
+        kinectTransform = {
+          position: {
+            x: transform.position.x,
+            y: transform.position.y
+          },
+          rotation: {
+              x: transform.rotation.x,
+              y: transform.rotation.y
+          }
+        };
+      } catch(e) {
+        console.error(`Bad krot data from: ${socket.id}`);
+      }
     });
 
     socket.on("savet", (d) => {
@@ -201,36 +232,44 @@ app.listen(3002);
 // # Function Bodies
 // ############################################################################
 function RecievePlayerPosition(data) {
-  // Step 1: Decompress the base64 string back to a byte array
-  let compressedBytes = Buffer.from(data, 'base64');
-  zlib.gunzip(compressedBytes, (err, decompressedBytes) => {
-    if (err) {
-      console.error('Error during decompression:', err);
-      return;
-    }
+  try{
+    // Step 1: Decompress the base64 string back to a byte array
+    let compressedBytes = Buffer.from(data, 'base64');
+    zlib.gunzip(compressedBytes, (err, decompressedBytes) => {
+      if (err) {
+        console.error('Error during decompression:', err);
+        return;
+      }
 
-    // Step 2: Extract SocketID and floats from the decompressed byte array
-    const idLength = 20; // SocketID is 20 characters long
-    let socketID = decompressedBytes.subarray(0, idLength).toString('utf8');
+      // Step 2: Extract SocketID and floats from the decompressed byte array
+      const idLength = 20; // SocketID is 20 characters long
+      let socketID = decompressedBytes.subarray(0, idLength).toString('utf8');
 
-    // Step 3: Check the rate limit
-    let currentTime = Date.now();
-    if (lastProcessedTime[socketID] && (currentTime - lastProcessedTime[socketID] < 70)) {
-        return; // Skip processing if within the rate limit window
-    }
+      // Step 3: Check the rate limit
+      let currentTime = Date.now();
+      if (lastProcessedTime[socketID] && (currentTime - lastProcessedTime[socketID] < 70)) {
+          return; // Skip processing if within the rate limit window
+      }
+      if(lastProcessedTime[socketID] === undefined || players[socketID] === undefined) return;
 
-    // Update last processed time
-    lastProcessedTime[socketID] = currentTime;
-    
-    let x = decompressedBytes.readFloatLE(idLength);
-    let y = decompressedBytes.readFloatLE(idLength + 4);
-    let z = decompressedBytes.readFloatLE(idLength + 8);
-    let xRot = decompressedBytes.readFloatLE(idLength + 12);
-    let yRot = decompressedBytes.readFloatLE(idLength + 16);
+      // Update last processed time
+      lastProcessedTime[socketID] = currentTime;
+      
+      let x = decompressedBytes.readFloatLE(idLength);
+      let y = decompressedBytes.readFloatLE(idLength + 4);
+      let z = decompressedBytes.readFloatLE(idLength + 8);
+      let xRot = decompressedBytes.readFloatLE(idLength + 12);
+      let yRot = decompressedBytes.readFloatLE(idLength + 16);
+      let display = decompressedBytes.readUInt8(idLength + 20) !== 0
 
-    // Step 3: Update the players map with the new position data
-    players[socketID] = { x, y, z, xRot, yRot };
-  });
+      // Step 3: Update the players map with the new position data
+      players[socketID] = { x, y, z, xRot, yRot, display };
+      
+    });
+  }
+  catch(e){
+    console.error(`Bad player pos data from: ${socket.id}`);
+  }
 }
 
 function SendKinectTransform() {
@@ -241,11 +280,19 @@ function SendKinectTransform() {
   }
   else
     io.to([CLIENT_ROOM]).emit("kinectTransform", JSON.stringify(kinectTransform));
+
+    Object.keys(lastProcessedTime).forEach((lpt) => {
+      if(lastProcessedTime[lpt] > 120*1000) {
+        delete players[lpt];
+        delete lastProcessedTime[lpt]
+      }
+    })
 }
 
 function SendPlayerPositions(){
   // Step 4: Serialize the players map and compress it
-  let serializedData = JSON.stringify(players);
+  // https://stackoverflow.com/questions/286141/remove-blank-attributes-from-an-object-in-javascript
+  let serializedData = JSON.stringify(Object.fromEntries(Object.entries(players).filter(([_, v]) => v != null)));
   zlib.gzip(Buffer.from(serializedData), (err, compressedResponse) => {
     if (err) {
       console.error('Error during compression:', err);
@@ -274,3 +321,9 @@ function SaveTransformFile() {
 
 setInterval(SendPlayerPositions, 1000/10);
 setInterval(SendKinectTransform, 1000/ 3);
+
+
+//https://stackoverflow.com/questions/9716468/pure-javascript-a-function-like-jquerys-isnumeric
+function isNumeric(n) {
+  return !isNaN(parseFloat(n)) && isFinite(n);
+}
