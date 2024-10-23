@@ -39,6 +39,16 @@ let kinectTransform = {
   rotation: {x: 0, y: 0}
 }
 
+const assignableColors = [
+  [238,64,53],
+  [243,119,54],
+  [253,244,152],
+  [123,192,67],
+  [3,146,207],
+  [103,56,136],
+  [141,85,36]
+]
+
 ReadTransformFile();
 
 // ############################################################################
@@ -77,8 +87,19 @@ io.sockets.on("connection", (socket) => {
   // Unity client connected
   if (socket.handshake.auth.token == process.env.UNITYKEY) {
     console.log(`Unity Connected - ${socket.id}`);
-    players[socket.id] = null;
-    lastProcessedTime[socket.id] = null;
+    players[socket.id] = {};
+    const randColor = assignableColors[Math.floor(Math.random() * assignableColors.length)];
+    players[socket.id].x = 0;
+    players[socket.id].y = 0;
+    players[socket.id].z = 0;
+    players[socket.id].xRot = 0;
+    players[socket.id].yRot = 0;
+    players[socket.id].display = false;
+    players[socket.id].r = randColor[0];
+    players[socket.id].g = randColor[1];
+    players[socket.id].b = randColor[2];
+    players[socket.id].affectLights = false;
+    lastProcessedTime[socket.id] = Date.now();
 
     socket.join(CLIENT_ROOM);
 
@@ -245,12 +266,14 @@ function RecievePlayerPosition(data) {
       const idLength = 20; // SocketID is 20 characters long
       let socketID = decompressedBytes.subarray(0, idLength).toString('utf8');
 
+      //Skip if the ID is invalid
+      if(lastProcessedTime[socketID] === undefined || players[socketID] === undefined) return;
+      
       // Step 3: Check the rate limit
       let currentTime = Date.now();
       if (lastProcessedTime[socketID] && (currentTime - lastProcessedTime[socketID] < 70)) {
           return; // Skip processing if within the rate limit window
       }
-      if(lastProcessedTime[socketID] === undefined || players[socketID] === undefined) return;
 
       // Update last processed time
       lastProcessedTime[socketID] = currentTime;
@@ -261,10 +284,16 @@ function RecievePlayerPosition(data) {
       let xRot = decompressedBytes.readFloatLE(idLength + 12);
       let yRot = decompressedBytes.readFloatLE(idLength + 16);
       let display = decompressedBytes.readUInt8(idLength + 20) !== 0
+      let affectLights = decompressedBytes.readUInt8(idLength + 21) !== 0
 
       // Step 3: Update the players map with the new position data
-      players[socketID] = { x, y, z, xRot, yRot, display };
-      
+      players[socketID].x = x;
+      players[socketID].y = y;
+      players[socketID].z = z;
+      players[socketID].xRot = xRot;
+      players[socketID].yRot = yRot;
+      players[socketID].display = display;
+      players[socketID].affectLights = affectLights;
     });
   }
   catch(e){
@@ -282,14 +311,25 @@ function SendKinectTransform() {
     io.to([CLIENT_ROOM]).emit("kinectTransform", JSON.stringify(kinectTransform));
 
     Object.keys(lastProcessedTime).forEach((lpt) => {
-      if(lastProcessedTime[lpt] > 120*1000) {
+      if(Date.now() - lastProcessedTime[lpt] > 120*1000) {
         delete players[lpt];
         delete lastProcessedTime[lpt]
       }
     })
 }
 
-function SendPlayerPositions(){
+function UpdateLights() {
+  const colorsToSend = [];
+  Object.entries(players).forEach(entry => {
+    const [key, value] = entry;
+    if(!value.display || !value.affectLights) return;
+    colorsToSend.push({r: value.r, g: value.g, b: value.b});
+  });
+  console.info(colorsToSend);
+  io.to(MIDI_ROOM).emit("lights_update", colorsToSend);
+}
+
+function SendPlayersData(){
   // Step 4: Serialize the players map and compress it
   // https://stackoverflow.com/questions/286141/remove-blank-attributes-from-an-object-in-javascript
   let serializedData = JSON.stringify(Object.fromEntries(Object.entries(players).filter(([_, v]) => v != null)));
@@ -319,8 +359,9 @@ function SaveTransformFile() {
   fs.writeFile(path.resolve(__dirname, "transform.json"), JSON.stringify(kinectTransform), (err) => {if(err)console.error(err)});
 }
 
-setInterval(SendPlayerPositions, 1000/10);
+setInterval(SendPlayersData, 1000/10);
 setInterval(SendKinectTransform, 1000/ 3);
+setInterval(UpdateLights, 1000/ 3);
 
 
 //https://stackoverflow.com/questions/9716468/pure-javascript-a-function-like-jquerys-isnumeric
