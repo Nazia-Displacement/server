@@ -49,6 +49,8 @@ const assignableColors = [
   [141,85,36]
 ]
 
+let remainingColors = [...assignableColors];
+
 ReadTransformFile();
 
 // ############################################################################
@@ -88,7 +90,7 @@ io.sockets.on("connection", (socket) => {
   if (socket.handshake.auth.token == process.env.UNITYKEY) {
     console.log(`Unity Connected - ${socket.id}`);
     players[socket.id] = {};
-    const randColor = assignableColors[Math.floor(Math.random() * assignableColors.length)];
+    const randColor = GetRandomColor();
     players[socket.id].x = 0;
     players[socket.id].y = 0;
     players[socket.id].z = 0;
@@ -367,4 +369,20 @@ setInterval(UpdateLights, 1000/ 3);
 //https://stackoverflow.com/questions/9716468/pure-javascript-a-function-like-jquerys-isnumeric
 function isNumeric(n) {
   return !isNaN(parseFloat(n)) && isFinite(n);
+}
+
+function GetRandomColor() {
+  // Shuffle remaining colors if all have been used
+  if (remainingColors.length === 0) {
+    remainingColors = [...assignableColors];
+  }
+
+  // Pick a random index from the remaining colors
+  const randomIndex = Math.floor(Math.random() * remainingColors.length);
+  const selectedColor = remainingColors[randomIndex];
+
+  // Remove the selected color from remainingColors to avoid repetition
+  remainingColors.splice(randomIndex, 1);
+
+  return selectedColor;
 }
