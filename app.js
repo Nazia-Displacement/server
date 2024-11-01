@@ -51,6 +51,9 @@ const assignableColors = [
 
 let remainingColors = [...assignableColors];
 
+const assignableMasks = [0,1,2,3,4]
+let remainingMasks = [...assignableMasks];
+
 ReadTransformFile();
 
 // ############################################################################
@@ -101,6 +104,7 @@ io.sockets.on("connection", (socket) => {
     players[socket.id].g = randColor[1];
     players[socket.id].b = randColor[2];
     players[socket.id].affectLights = false;
+    players[socket.id].mask = GetRandomMask();
     lastProcessedTime[socket.id] = Date.now();
 
     socket.join(CLIENT_ROOM);
@@ -385,4 +389,20 @@ function GetRandomColor() {
   remainingColors.splice(randomIndex, 1);
 
   return selectedColor;
+}
+
+function GetRandomMask() {
+  // Shuffle remaining colors if all have been used
+  if (remainingMasks.length === 0) {
+    remainingMasks = [...assignableMasks];
+  }
+
+  // Pick a random index from the remaining colors
+  const randomIndex = Math.floor(Math.random() * remainingMasks.length);
+  const selectedMask = remainingMasks[randomIndex];
+
+  // Remove the selected color from remainingColors to avoid repetition
+  remainingMasks.splice(randomIndex, 1);
+
+  return selectedMask;
 }
